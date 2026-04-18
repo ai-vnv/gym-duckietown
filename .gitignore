@@ -9,3 +9,8 @@ bin
 trained_models
 dist
 requirements.resolved
+
+# Local dev / generated (fork maintenance)
+.venv/
+venv/
+recordings/*.mp4

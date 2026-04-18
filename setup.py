@@ -25,8 +25,9 @@ line = "daffy"
 
 install_requires = [
     "gym>=0.17.1",
-    "numpy>=1.10.0,<=1.20.0",
-    "pyglet",
+    # Relaxed from <=1.20 for modern Python/macOS ARM wheels (local dev)
+    "numpy>=1.21.0,<2.0.0",
+    "pyglet>=1.5.0,<2",
     # 'pyglet',
     "pyzmq>=16.0.0",
     "opencv-python>=3.4",

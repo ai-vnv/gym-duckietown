@@ -13,8 +13,11 @@ import os
 import pyglet
 
 on_mac = "Darwin" in platform.system()
+_force_headless = os.environ.get("DUCKIETOWN_HEADLESS", "").lower() in ("1", "true", "yes")
 print(pyglet.options)
-if on_mac:
+if _force_headless:
+    pyglet.options["headless"] = True
+elif on_mac:
     pyglet.options["headless"] = False
 else:
     pyglet.options["headless"] = True
@@ -48,3 +51,7 @@ for map_name, filename in list_maps2().items():
 register(id="MultiMap-v0", entry_point="gym_duckietown.envs:MultiMapEnv", reward_threshold=400.0)
 
 register(id="Duckiebot-v0", entry_point="gym_duckietown.envs:DuckiebotEnv", reward_threshold=400.0)
+
+from .pwm_numpy_compat import apply_patch as _apply_pwm_numpy_compat
+
+_apply_pwm_numpy_compat()

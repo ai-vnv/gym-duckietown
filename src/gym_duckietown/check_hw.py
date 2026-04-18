@@ -1,9 +1,14 @@
 from ctypes import c_char_p, cast
 from typing import Dict
 import json
+import platform
+
 import pyglet
 
-pyglet.options["headless"] = True
+# EGL headless is unavailable on macOS; keep Cocoa GL. Simulator imports this
+# module before graphics first loads pyglet.gl, so do not force headless there.
+if platform.system() != "Darwin":
+    pyglet.options["headless"] = True
 from pyglet import gl
 
 __all__ = ["get_graphics_information"]
