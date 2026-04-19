@@ -53,7 +53,7 @@ register(id="MultiMap-v0", entry_point="gym_duckietown.envs:MultiMapEnv", reward
 register(id="Duckiebot-v0", entry_point="gym_duckietown.envs:DuckiebotEnv", reward_threshold=400.0)
 
 # Experimental “Arabian desert outdoor” look: warm sky + sand ground (same maps, tinted horizon/ground).
-from .scene_presets import ARABIAN_DESERT_OUTDOOR
+from .scene_presets import ARABIAN_DESERT_OUTDOOR, MINING_PIT_OUTDOOR
 
 register(
     id="Duckietown-small_loop_arabian-v0",
@@ -73,6 +73,13 @@ register(
     entry_point="gym_duckietown.envs:DuckietownEnv",
     reward_threshold=400.0,
     kwargs={**ARABIAN_DESERT_OUTDOOR, "map_name": "udem1"},
+)
+# Winding torture-track map + mining/off-road look (switchback “pit path” metaphor; terrain is still flat).
+register(
+    id="Duckietown-zigzag_dists_mining-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**MINING_PIT_OUTDOOR, "map_name": "zigzag_dists"},
 )
 
 from .pwm_numpy_compat import apply_patch as _apply_pwm_numpy_compat

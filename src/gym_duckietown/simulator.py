@@ -11,7 +11,7 @@ if sys.version_info >= (3, 8):
 else:
     from typing_extensions import TypedDict
 
-from typing import Any, cast, Dict, List, NewType, Optional, Sequence, Tuple, Union
+from typing import Any, cast, Dict, List, Mapping, NewType, Optional, Sequence, Tuple, Union
 
 import geometry
 import geometry as g
@@ -241,6 +241,10 @@ class Simulator(gym.Env):
         color_sky: Sequence[float] = BLUE_SKY,
         style: str = "photos",
         enable_leds: bool = False,
+        texture_kind_remap: Optional[Mapping[str, str]] = None,
+        tile_rgb_mult: Sequence[float] = (1.0, 1.0, 1.0),
+        tile_kind_rgb_mult: Optional[Mapping[str, Sequence[float]]] = None,
+        mining_ground_scatter: bool = False,
     ):
         """
 
@@ -264,8 +268,22 @@ class Simulator(gym.Env):
         :param randomize_maps_on_reset: If true, randomizes the map on reset (Slows down training)
         :param style: String that represent which tiles will be loaded. One of ["photos", "synthetic"]
         :param enable_leds: Enables LEDs drawing.
+        :param texture_kind_remap: Map logical tile kind (from the YAML map) to another kind’s
+            photo texture, e.g. ``{"asphalt": "grass"}`` for off-road visuals without editing maps.
+        :param tile_rgb_mult: RGB multiplier applied to every tile’s GL color (after per-kind mult).
+        :param tile_kind_rgb_mult: Optional per-kind RGB multipliers (keys match map tile kinds).
+        :param mining_ground_scatter: If true, floor clutter triangles use pale / brown / gravel tones
+            instead of grey noise (still flat geometry — no real pit excavation in this sim).
         """
         self.enable_leds = enable_leds
+        self.texture_kind_remap = dict(texture_kind_remap) if texture_kind_remap else {}
+        self.tile_rgb_mult = np.array(tile_rgb_mult[:3], dtype=float)
+        self.tile_kind_rgb_mult = (
+            {k: np.array(v[:3], dtype=float) for k, v in tile_kind_rgb_mult.items()}
+            if tile_kind_rgb_mult
+            else {}
+        )
+        self.mining_ground_scatter = mining_ground_scatter
         information = get_graphics_information()
         logger.info(
             f"Information about the graphics card:",
@@ -633,12 +651,25 @@ class Simulator(gym.Env):
         numTris = self.num_tris_distractors
         verts = []
         colors = []
-        for _ in range(0, 3 * numTris):
-            p = self.np_random.uniform(low=[-20, -0.6, -20], high=[20, -0.3, 20], size=(3,))
-            c = self.np_random.uniform(low=0, high=0.9)
-            c = self._perturb([c, c, c], 0.1)
-            verts += [p[0], p[1], p[2]]
-            colors += [c[0], c[1], c[2]]
+        if self.mining_ground_scatter:
+            palettes = (
+                (0.92, 0.89, 0.82),
+                (0.62, 0.48, 0.34),
+                (0.48, 0.46, 0.44),
+            )
+            for _ in range(0, 3 * numTris):
+                p = self.np_random.uniform(low=[-20, -0.6, -20], high=[20, -0.3, 20], size=(3,))
+                pal = palettes[int(self.np_random.integers(0, len(palettes)))]
+                c = self._perturb(list(pal), 0.1)
+                verts += [p[0], p[1], p[2]]
+                colors += [c[0], c[1], c[2]]
+        else:
+            for _ in range(0, 3 * numTris):
+                p = self.np_random.uniform(low=[-20, -0.6, -20], high=[20, -0.3, 20], size=(3,))
+                c = self.np_random.uniform(low=0, high=0.9)
+                c = self._perturb([c, c, c], 0.1)
+                verts += [p[0], p[1], p[2]]
+                colors += [c[0], c[1], c[2]]
 
         self.tri_vlist = pyglet.graphics.vertex_list(3 * numTris, ("v3f", verts), ("c3f", colors))
 
@@ -647,14 +678,20 @@ class Simulator(gym.Env):
             rng = self.np_random if self.domain_rand else None
 
             kind = tile["kind"]
-            fn = get_texture_file(f"tiles-processed/{self.style}/{kind}/texture")[0]
+            tex_kind = self.texture_kind_remap.get(kind, kind)
+            fn = get_texture_file(f"tiles-processed/{self.style}/{tex_kind}/texture")[0]
             # ft = get_fancy_textures(self.style, texture_name)
             t = load_texture(fn, segment=False, segment_into_color=False)
             tt = Texture(t, tex_name=kind, rng=rng)
             tile["texture"] = tt
 
-            # Random tile color multiplier
-            tile["color"] = self._perturb([1, 1, 1, 1], 0.2)
+            base = np.ones(4, dtype=float)
+            if kind in self.tile_kind_rgb_mult:
+                base[:3] *= self.tile_kind_rgb_mult[kind]
+            else:
+                base[:3] *= self.tile_rgb_mult
+            jitter = 0.1 if not self.domain_rand else 0.2
+            tile["color"] = self._perturb(base, jitter)
 
         # Randomize object parameters
         for obj in self.objects:

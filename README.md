@@ -47,6 +47,7 @@ This fork is maintained for **ai-vnv** lab use: keep compatibility with upstream
 - [`scripts/record_pp_failures.py`](scripts/record_pp_failures.py) — short MP4 recordings of Pure Pursuit failure modes.
 - **Arabian desert outdoor** — warm sky + sand ground tint (same maps; `domain_rand=False` for stable colors). Env IDs: `Duckietown-small_loop_arabian-v0`, `Duckietown-loop_obstacles_arabian-v0`, `Duckietown-udem1_arabian-v0` (stock **udem1** campus road layout + desert look — closest built-in proxy for a large university site; not georeferenced to any real campus). Preset: [`scene_presets.py`](src/gym_duckietown/scene_presets.py); demo rollouts: [`scripts/experiment_arabian_desert.py`](scripts/experiment_arabian_desert.py); 20s clip: `python scripts/render_kfupm_style_video.py` → `recordings/kfupm_style_udem1_arabian_20s.mp4`.
 - **Multiview (2×2)** — driver, whole-map bird’s-eye, top-follow, and rear cameras in one RGB panel: `env.unwrapped.render_multiview_rgb()` on any `DuckietownEnv`, or wrap with `gym_duckietown.wrappers.MultiViewObservationWrapper` (four extra full renders per step — for video/demos). Example: `python scripts/demo_multiview.py` → `recordings/multiview_demo.mp4`.
+- **Mining / off-road pit (visual preset)** — `MINING_PIT_OUTDOOR` in [`scene_presets.py`](src/gym_duckietown/scene_presets.py): remaps asphalt tiles to grass textures with dark haul-field tints, brownish lane tiles, pale sand horizon plane, and sand/gravel-colored ground scatter. Env `Duckietown-zigzag_dists_mining-v0` pairs it with the winding zigzag map (flat sim — no real pit geometry). Demo: `python scripts/demo_mining_pit.py` → `recordings/mining_pit_multiview.mp4`.
 
 ---
 
@@ -94,6 +95,7 @@ Gym-Duckietown places your agent (a Duckiebot) in a Duckietown map: roads, turns
 - `Duckietown-small_loop-v0`, `Duckietown-small_loop_cw-v0`, `Duckietown-zigzag_dists-v0`
 - `Duckietown-loop_obstacles-v0`, `Duckietown-loop_pedestrians-v0`
 - `Duckietown-small_loop_arabian-v0`, `Duckietown-loop_obstacles_arabian-v0`, `Duckietown-udem1_arabian-v0` (**fork:** desert-style sky/ground; same geometry as the maps above)
+- `Duckietown-zigzag_dists_mining-v0` (**fork:** mining/off-road look on `zigzag_dists`; see [`scene_presets.py`](src/gym_duckietown/scene_presets.py))
 - `MultiMap-v0` (cycles maps), `Duckiebot-v0`
 
 Hardware and AIDO templates: see [Duckietown embodied docs](https://docs-old.duckietown.org/daffy/AIDO/out/embodied.html).
