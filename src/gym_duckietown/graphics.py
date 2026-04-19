@@ -1,8 +1,14 @@
 # coding=utf-8
+"""
+OpenGL texture helpers for Gym-Duckietown (Pyglet 1.x).
+
+Provides file-backed :func:`load_texture` (used by tiles and meshes) and
+in-memory :func:`load_texture_from_rgba` for fork ``custom_tile_textures``.
+"""
 import math
 from ctypes import byref
 from functools import lru_cache
-from typing import Tuple
+from typing import Any, Tuple
 
 import cv2
 import numpy as np
@@ -36,9 +42,7 @@ def get_texture(tex_name: str, rng=None, segment: bool = False) -> "Texture":
 
 
 class Texture:
-    """
-    Manage the caching of textures, and texture randomization
-    """
+    """Thin wrapper around a Pyglet texture with optional domain-randomization hooks."""
 
     # Cache of textures
     tex_cache = {}
@@ -68,12 +72,18 @@ def should_segment_out(tex_path):
 
 @lru_cache(maxsize=None)
 def load_texture(tex_path: str, segment: bool = False, segment_into_color=None):
-    """segment_into_black controls what type of segmentation we apply: for tiles and all ground textures,
-    replacing
-    unimportant stuff with black is a good idea. For other things, replacing it with transparency is good too
-    (for example, we don't want black traffic lights, because they go over the roads, and they'd cut our
-    view of
-    things).
+    """Load an image from disk and upload it as a 2D OpenGL texture.
+
+    Args:
+        tex_path: Path to a JPG/PNG readable by Pyglet.
+        segment: If ``True``, apply segmentation heuristics (lane vs.\ sign textures).
+        segment_into_color: RGB fill used by some segmentation branches when ``segment`` is ``True``.
+
+    Returns:
+        A Pyglet texture object bound with ``GL_RGBA`` (or ``GL_RGB`` for ``.jpg`` paths).
+
+    Note:
+        Results are memoized by ``(tex_path, segment, segment_into_color)`` via ``lru_cache``.
     """
     if segment_into_color is None:
         segment_into_color = [0, 0, 0]
@@ -166,6 +176,101 @@ def load_texture(tex_path: str, segment: bool = False, segment_into_color=None):
             image_data,
         )
 
+    return tex
+
+
+def _is_power_of_two(n: int) -> bool:
+    return n > 0 and (n & (n - 1)) == 0
+
+
+def _next_power_of_two(n: int) -> int:
+    if n <= 1:
+        return 1
+    return 1 << (n - 1).bit_length()
+
+
+def _ensure_rgba_uint8(arr: "np.ndarray") -> "np.ndarray":
+    """Return contiguous ``H×W×4`` ``uint8`` RGBA."""
+    a = np.asarray(arr)
+    if a.ndim != 3 or a.shape[2] not in (3, 4):
+        raise ValueError(f"tile texture array must be H×W×3 or H×W×4, got shape {a.shape}")
+    if not np.issubdtype(a.dtype, np.uint8):
+        if np.issubdtype(a.dtype, np.floating):
+            a = np.clip(a * 255.0, 0.0, 255.0)
+        a = np.clip(a, 0, 255).astype(np.uint8)
+    if a.shape[2] == 3:
+        alpha = np.full((a.shape[0], a.shape[1], 1), 255, dtype=np.uint8)
+        a = np.concatenate([a, alpha], axis=2)
+    return np.ascontiguousarray(a)
+
+
+def _resize_rgba_for_gl(
+    arr: "np.ndarray", *, enforce_pot: bool, max_side: int
+) -> "np.ndarray":
+    """Clamp size and optionally resize to power-of-two sides (legacy GL friendliness)."""
+    h, w = arr.shape[:2]
+    m = max(h, w)
+    if m > max_side and m > 0:
+        scale = max_side / float(m)
+        nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
+        arr = cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_AREA)
+        h, w = arr.shape[:2]
+    if not enforce_pot:
+        return np.ascontiguousarray(arr)
+    if _is_power_of_two(w) and _is_power_of_two(h):
+        return np.ascontiguousarray(arr)
+    nw, nh = _next_power_of_two(w), _next_power_of_two(h)
+    return np.ascontiguousarray(cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_LINEAR))
+
+
+def load_texture_from_rgba(
+    arr: "np.ndarray",
+    *,
+    enforce_pot: bool = True,
+    max_side: int = 4096,
+) -> Any:
+    """Upload an in-memory RGB or RGBA image to a 2D OpenGL texture.
+
+    Uses the same ``glTexImage2D`` path as :func:`load_texture` for RGBA sources. Requires an
+    active Pyglet/OpenGL context (the simulator creates a headless window on import).
+
+    Args:
+        arr: ``H×W×3`` or ``H×W×4`` array; non-``uint8`` values are clipped into range.
+        enforce_pot: If ``True``, resize so width and height are powers of two (driver-friendly).
+        max_side: If the longest side exceeds this value, downscale before upload.
+
+    Returns:
+        Pyglet texture handle (same type as ``ImageData.get_texture()``).
+
+    Raises:
+        ValueError: If ``arr`` is not rank-3 with 3 or 4 channels.
+    """
+    rgba = _resize_rgba_for_gl(_ensure_rgba_uint8(arr), enforce_pot=enforce_pot, max_side=max_side)
+    h, w = rgba.shape[:2]
+    logger.debug(f"load_texture_from_rgba: {w}x{h} rgba")
+    gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+    top_to_bottom_flag = -1
+    bytes_per_row = w * 4
+    raw = rgba.tobytes()
+    img = pyglet.image.ImageData(
+        w, h, "RGBA", raw, pitch=top_to_bottom_flag * bytes_per_row
+    )
+    tex = img.get_texture()
+    gl.glEnable(tex.target)
+    gl.glBindTexture(tex.target, tex.id)
+    rawimage = img.get_image_data()
+    image_data = rawimage.get_data("RGBA", w * 4)
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D,
+        0,
+        gl.GL_RGBA,
+        w,
+        h,
+        0,
+        gl.GL_RGBA,
+        gl.GL_UNSIGNED_BYTE,
+        image_data,
+    )
     return tex
 
 

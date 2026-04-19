@@ -1,0 +1,3 @@
+# Read the Docs: Sphinx only (package installed separately from root).
+sphinx>=6,<8
+sphinx-rtd-theme>=2

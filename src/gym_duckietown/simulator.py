@@ -1,3 +1,9 @@
+"""
+Core Gym environment: map load, OpenGL tile rendering, dynamics, and rewards.
+
+Fork-related kwargs include ``texture_kind_remap``, ``custom_tile_texture_paths``,
+``custom_tile_textures``, and ``mining_ground_scatter`` (see ``scene_presets``).
+"""
 import itertools
 import os
 from collections import namedtuple
@@ -11,7 +17,7 @@ if sys.version_info >= (3, 8):
 else:
     from typing_extensions import TypedDict
 
-from typing import Any, cast, Dict, List, Mapping, NewType, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Mapping, NewType, Optional, Sequence, Set, Tuple, Union
 
 import geometry
 import geometry as g
@@ -59,6 +65,7 @@ from .graphics import (
     create_frame_buffers,
     gen_rot_matrix,
     load_texture,
+    load_texture_from_rgba,
     Texture,
 )
 from .objects import CheckerboardObj, DuckiebotObj, DuckieObj, TrafficLightObj, WorldObj
@@ -188,6 +195,55 @@ REWARD_INVALID_POSE = -1000
 
 MAX_SPAWN_ATTEMPTS = 5000
 
+
+def _gym_duckietown_repo_root() -> Optional[str]:
+    """Best-effort repo root (contains ``assets/`` or ``maps/``) for resolving relative texture paths."""
+    d = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.abspath(os.path.join(d, "..", ".."))
+    if os.path.isdir(os.path.join(cand, "assets")) or os.path.isdir(os.path.join(cand, "maps")):
+        return cand
+    return None
+
+
+def resolve_custom_tile_texture_path(path_str: str) -> str:
+    r"""Resolve a filesystem path for ``Simulator``'s ``custom_tile_texture_paths`` entries.
+
+    Resolution order:
+
+    #. If ``path_str`` exists as given, return its absolute path.
+    #. Else try ``os.path.join(cwd, path_str)``.
+    #. Else ``GYM_DUCKIETOWN_REPO`` if set.
+    #. Else the repository root inferred from ``gym_duckietown/simulator.py`` (``src`` layout).
+
+    Args:
+        path_str: Absolute path or path relative to cwd / repo root.
+
+    Returns:
+        Absolute path to an existing image file.
+
+    Raises:
+        FileNotFoundError: If no candidate location contains the file.
+    """
+    if os.path.isfile(path_str):
+        return os.path.abspath(path_str)
+    rel = path_str.replace("\\", "/")
+    bases = [os.getcwd()]
+    env_root = os.environ.get("GYM_DUCKIETOWN_REPO", "").strip()
+    if env_root:
+        bases.append(env_root)
+    root = _gym_duckietown_repo_root()
+    if root:
+        bases.append(root)
+    for base in bases:
+        c = os.path.join(base, rel)
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+    raise FileNotFoundError(
+        f"custom tile texture not found: {path_str!r} — "
+        "use an absolute path, run from the repo root, or set GYM_DUCKIETOWN_REPO"
+    )
+
+
 LanePosition0 = namedtuple("LanePosition", "dist dot_dir angle_deg angle_rad")
 
 
@@ -245,6 +301,10 @@ class Simulator(gym.Env):
         tile_rgb_mult: Sequence[float] = (1.0, 1.0, 1.0),
         tile_kind_rgb_mult: Optional[Mapping[str, Sequence[float]]] = None,
         mining_ground_scatter: bool = False,
+        custom_tile_texture_paths: Optional[Mapping[str, str]] = None,
+        custom_tile_textures: Optional[Mapping[str, Union[np.ndarray, Callable[..., np.ndarray]]]] = None,
+        procedural_tile_texture_enforce_pot: bool = True,
+        procedural_tile_texture_max_side: int = 4096,
     ):
         """
 
@@ -274,9 +334,30 @@ class Simulator(gym.Env):
         :param tile_kind_rgb_mult: Optional per-kind RGB multipliers (keys match map tile kinds).
         :param mining_ground_scatter: If true, floor clutter triangles use pale / brown / gravel tones
             instead of grey noise (still flat geometry — no real pit excavation in this sim).
+        :param custom_tile_texture_paths: Map tile kind (YAML kind, or post-remap kind) to an image
+            path (PNG/JPG). Loaded with ``load_texture`` into OpenGL instead of duckietown-world
+            atlases for matching tiles. See ``scene_presets.MINING_PIT_OUTDOOR_GL``.
+        :param custom_tile_textures: Map tile kind to an ``HxWx{3,4} uint8`` array **or** a callable
+            ``f(rng) -> array`` (``rng`` is ``self.np_random``, a ``Generator`` or ``RandomState``).
+            Uploaded via ``load_texture_from_rgba``.
+            Takes precedence over ``custom_tile_texture_paths``. Only kinds present on the map are
+            uploaded once per reset. See ``scene_presets.MINING_PIT_OUTDOOR_PROG``.
+        :param procedural_tile_texture_enforce_pot: If true, resize in-memory tile textures to
+            power-of-two dimensions before GL upload.
+        :param procedural_tile_texture_max_side: Longest side cap before upload (downscale).
         """
         self.enable_leds = enable_leds
         self.texture_kind_remap = dict(texture_kind_remap) if texture_kind_remap else {}
+        self.custom_tile_texture_paths = (
+            {str(k): str(v) for k, v in custom_tile_texture_paths.items()}
+            if custom_tile_texture_paths
+            else {}
+        )
+        self.custom_tile_textures: Dict[str, Union[np.ndarray, Callable[..., np.ndarray]]] = (
+            dict(custom_tile_textures) if custom_tile_textures else {}
+        )
+        self.procedural_tile_texture_enforce_pot = procedural_tile_texture_enforce_pot
+        self.procedural_tile_texture_max_side = int(procedural_tile_texture_max_side)
         self.tile_rgb_mult = np.array(tile_rgb_mult[:3], dtype=float)
         self.tile_kind_rgb_mult = (
             {k: np.array(v[:3], dtype=float) for k, v in tile_kind_rgb_mult.items()}
@@ -673,13 +754,35 @@ class Simulator(gym.Env):
 
         self.tri_vlist = pyglet.graphics.vertex_list(3 * numTris, ("v3f", verts), ("c3f", colors))
 
+        prog_gl = self._rebuild_programmatic_tile_gl_textures()
+
         # Randomize tile parameters
         for tile in self.grid:
             rng = self.np_random if self.domain_rand else None
 
             kind = tile["kind"]
             tex_kind = self.texture_kind_remap.get(kind, kind)
-            fn = get_texture_file(f"tiles-processed/{self.style}/{tex_kind}/texture")[0]
+            pk = self._programmatic_tile_texture_key(kind, tex_kind)
+            if pk is not None and pk in prog_gl:
+                t = prog_gl[pk]
+                tt = Texture(t, tex_name=kind, rng=rng)
+                tile["texture"] = tt
+                base = np.ones(4, dtype=float)
+                if kind in self.tile_kind_rgb_mult:
+                    base[:3] *= self.tile_kind_rgb_mult[kind]
+                else:
+                    base[:3] *= self.tile_rgb_mult
+                jitter = 0.1 if not self.domain_rand else 0.2
+                tile["color"] = self._perturb(base, jitter)
+                continue
+
+            custom = self.custom_tile_texture_paths
+            if kind in custom:
+                fn = resolve_custom_tile_texture_path(custom[kind])
+            elif tex_kind in custom:
+                fn = resolve_custom_tile_texture_path(custom[tex_kind])
+            else:
+                fn = get_texture_file(f"tiles-processed/{self.style}/{tex_kind}/texture")[0]
             # ft = get_fancy_textures(self.style, texture_name)
             t = load_texture(fn, segment=False, segment_into_color=False)
             tt = Texture(t, tex_name=kind, rng=rng)
@@ -1110,6 +1213,45 @@ class Simulator(gym.Env):
         if j < 0 or j >= self.grid_height:
             return None
         return self.grid[j * self.grid_width + i]
+
+    def _programmatic_tile_texture_key(self, kind: str, tex_kind: str) -> Optional[str]:
+        ct = self.custom_tile_textures
+        if not ct:
+            return None
+        if kind in ct:
+            return str(kind)
+        if tex_kind in ct:
+            return str(tex_kind)
+        return None
+
+    def _materialize_custom_tile_rgba(self, source: Union[np.ndarray, Callable[..., np.ndarray]]) -> np.ndarray:
+        if callable(source):
+            arr = source(self.np_random)
+        else:
+            arr = source
+        return np.asarray(arr)
+
+    def _rebuild_programmatic_tile_gl_textures(self) -> Dict[str, Any]:
+        """One GL texture per configured key that appears on the current map."""
+        out: Dict[str, Any] = {}
+        ct = self.custom_tile_textures
+        if not ct:
+            return out
+        keys_used: Set[str] = set()
+        for tile in self.grid:
+            k = tile["kind"]
+            tk = self.texture_kind_remap.get(k, k)
+            pk = self._programmatic_tile_texture_key(k, tk)
+            if pk is not None:
+                keys_used.add(pk)
+        for pk in keys_used:
+            rgba = self._materialize_custom_tile_rgba(ct[pk])
+            out[pk] = load_texture_from_rgba(
+                rgba,
+                enforce_pot=self.procedural_tile_texture_enforce_pot,
+                max_side=self.procedural_tile_texture_max_side,
+            )
+        return out
 
     def _perturb(self, val: Union[float, np.ndarray, List[float]], scale: float = 0.1) -> np.ndarray:
         """
