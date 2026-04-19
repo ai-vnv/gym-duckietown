@@ -52,6 +52,22 @@ register(id="MultiMap-v0", entry_point="gym_duckietown.envs:MultiMapEnv", reward
 
 register(id="Duckiebot-v0", entry_point="gym_duckietown.envs:DuckiebotEnv", reward_threshold=400.0)
 
+# Experimental “Arabian desert outdoor” look: warm sky + sand ground (same maps, tinted horizon/ground).
+from .scene_presets import ARABIAN_DESERT_OUTDOOR
+
+register(
+    id="Duckietown-small_loop_arabian-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**ARABIAN_DESERT_OUTDOOR, "map_name": "small_loop"},
+)
+register(
+    id="Duckietown-loop_obstacles_arabian-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**ARABIAN_DESERT_OUTDOOR, "map_name": "loop_obstacles"},
+)
+
 from .pwm_numpy_compat import apply_patch as _apply_pwm_numpy_compat
 
 _apply_pwm_numpy_compat()
