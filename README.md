@@ -1,12 +1,14 @@
-# Gym-Duckietown
+# Gym-Duckietown (ai-vnv fork)
 
-**Repository:** [`ai-vnv/gym-duckietown`](https://github.com/ai-vnv/gym-duckietown) · **branch:** `daffy`
+[![CI](https://github.com/ai-vnv/gym-duckietown/actions/workflows/ci.yml/badge.svg?branch=daffy)](https://github.com/ai-vnv/gym-duckietown/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Docs source](https://img.shields.io/badge/docs-Sphinx-2980B9.svg)](https://github.com/ai-vnv/gym-duckietown/tree/daffy/docs)
+[![Upstream](https://img.shields.io/badge/upstream-duckietown%2Fgym--duckietown-lightgrey)](https://github.com/duckietown/gym-duckietown)
 
-> **This is a fork**, not the official Duckietown README verbatim.  
-> **Upstream project:** [duckietown/gym-duckietown](https://github.com/duckietown/gym-duckietown) (`daffy`).  
-> Sections labeled **Fork note** describe **this fork only**—maintainers, install from this repo, and patches for modern Python/tooling. The science, simulator design, and citation below follow the **original** Duckietown Gym-Duckietown work.
+**Repository:** [`ai-vnv/gym-duckietown`](https://github.com/ai-vnv/gym-duckietown) · **branch:** `daffy`  
+**Upstream:** [duckietown/gym-duckietown](https://github.com/duckietown/gym-duckietown) (`daffy`)
 
-[Duckietown](https://duckietown.org/) self-driving car simulator environments for OpenAI Gym, written in Python/OpenGL (Pyglet).
+[Duckietown](https://duckietown.org/) self-driving car **Gym** environments in Python + OpenGL (Pyglet). This README is for **this fork** (modern NumPy 1.x, Pyglet 1.x, macOS Cocoa, lab presets). For legacy install/troubleshooting text, see the [upstream README](https://github.com/duckietown/gym-duckietown/blob/daffy/README.md).
 
 Please cite the original work:
 
@@ -21,125 +23,108 @@ Please cite the original work:
 }
 ```
 
-Simulator origins: [Mila](https://mila.quebec/).
+---
 
-<p align="center">
-<img src="media/simplesim_free.png" width="300px"><br>
-</p>
+## Documentation & CI
+
+| Resource | Link / command |
+|----------|----------------|
+| **Sphinx docs** (API + fork guide) | Sources in [`docs/`](docs/); local build: `pip install -e ".[dev]" && sphinx-build -b html docs docs/_build/html`. **Read the Docs:** import this repo (`.readthedocs.yaml` at root) to publish `latest`. |
+| **CI** | [GitHub Actions](https://github.com/ai-vnv/gym-duckietown/actions) — `pytest` under **Xvfb** (Linux) + Sphinx HTML **artifact** |
+| **V&V register** | [`vnv/procedural_tiles_vnvspec.json`](vnv/procedural_tiles_vnvspec.json) |
+| **Pedagogy notebook** | [`notebooks/gym_duckietown_pedagogy.ipynb`](notebooks/gym_duckietown_pedagogy.ipynb) |
 
 ---
 
-## Fork note — maintainers & scope
-
-This fork is maintained for **ai-vnv** lab use: keep compatibility with upstream **`daffy`**, while making `pip install -e .` and the simulator run on **current Python (3.10+)**, **NumPy 1.x**, **Pyglet 1.x**, **macOS** (Cocoa GL), and **Linux/Colab** (headless/EGL or Xvfb).  
-**These fixes are not from the original Duckietown maintainers**; they live only in this fork unless upstream merges them.
-
-| Area | Change (this fork only) |
-|------|-------------------------|
-| **`setup.py`** | `numpy>=1.21,<2`; `pyglet>=1.5,<2` (Pyglet 2 drops GLU used here). |
-| **`pwm_numpy_compat.py`** | Patches `duckietown-world` PWM integration so accelerations stay scalar with current NumPy; loaded from `gym_duckietown/__init__.py`. |
-| **`check_hw.py`** | On **macOS**, do not force EGL-only headless mode (use Cocoa). Linux unchanged for servers/Colab. |
-| **`__init__.py`** | Optional `DUCKIETOWN_HEADLESS=1` to force headless on Linux. |
-
-**Extras in this fork (not upstream):**
-
-- [`notebooks/gym_duckietown_pedagogy.ipynb`](notebooks/gym_duckietown_pedagogy.ipynb) — pedagogy / falsification demo (uses this repo’s clone URL in Colab).
-- [`scripts/record_pp_failures.py`](scripts/record_pp_failures.py) — short MP4 recordings of Pure Pursuit failure modes.
-- **Arabian desert outdoor** — warm sky + sand ground tint (same maps; `domain_rand=False` for stable colors). Env IDs: `Duckietown-small_loop_arabian-v0`, `Duckietown-loop_obstacles_arabian-v0`, `Duckietown-udem1_arabian-v0` (stock **udem1** campus road layout + desert look — closest built-in proxy for a large university site; not georeferenced to any real campus). Preset: [`scene_presets.py`](src/gym_duckietown/scene_presets.py); demo rollouts: [`scripts/experiment_arabian_desert.py`](scripts/experiment_arabian_desert.py); 20s clip: `python scripts/render_kfupm_style_video.py` → `recordings/kfupm_style_udem1_arabian_20s.mp4`.
-- **Multiview (2×2)** — driver, whole-map bird’s-eye, top-follow, and rear cameras in one RGB panel: `env.unwrapped.render_multiview_rgb()` on any `DuckietownEnv`, or wrap with `gym_duckietown.wrappers.MultiViewObservationWrapper` (four extra full renders per step — for video/demos). Example: `python scripts/demo_multiview.py` → `recordings/multiview_demo.mp4`.
-- **Mining / off-road pit (visual preset)** — `MINING_PIT_OUTDOOR` in [`scene_presets.py`](src/gym_duckietown/scene_presets.py): remaps large ``asphalt`` fill cells to ``floor`` textures (avoids bright grass), brown-tints lane tiles, pale sand horizon plane, and sand/gravel-colored ground scatter. Env `Duckietown-zigzag_dists_mining-v0` pairs it with the winding zigzag map (flat sim — no real pit geometry). Demo: `python scripts/demo_mining_pit.py` → `recordings/mining_pit_multiview.mp4`.
-- **Procedural mining assets** — [`scripts/generate_mining_assets.py`](scripts/generate_mining_assets.py) writes PNG sand/gravel textures plus `mining_pit_bowl.obj` / `.mtl` under `assets/mining_generated/` (ignored by git; re-run to regenerate). Edit meshes with [`scripts/edit_obj.py`](scripts/edit_obj.py) (scale / translate `v` lines; pass-through `f`/`vn`/`vt`). For Blender or a custom loader; not wired into the stock Duckietown tile renderer.
-
----
-
-## Fork note — install **this** repository
+## Install (this repository)
 
 ```bash
 git clone -b daffy https://github.com/ai-vnv/gym-duckietown.git
 cd gym-duckietown
-python3.10 -m venv .venv && source .venv/bin/activate   # 3.10+ recommended
-pip install -e .
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"    # includes pytest + Sphinx for docs/tests
 ```
 
-Optional: `pip install jupyter imageio imageio-ffmpeg` for the notebook and recordings.
+Optional: `jupyter`, `imageio`, `imageio-ffmpeg` for notebooks and MP4 scripts.
 
----
-
-## Fork note — stay aligned with upstream Duckietown
+**Merge upstream when needed:**
 
 ```bash
-git remote add upstream https://github.com/duckietown/gym-duckietown.git   # once, if missing
-git fetch upstream
-git merge upstream/daffy
-git push origin daffy
+git remote add upstream https://github.com/duckietown/gym-duckietown.git   # once
+git fetch upstream && git merge upstream/daffy && git push origin daffy
 ```
 
 ---
 
-## Fork note — Google Colab
+## Fork vs upstream (summary)
 
-Use [`notebooks/gym_duckietown_pedagogy.ipynb`](notebooks/gym_duckietown_pedagogy.ipynb): the bootstrap cell clones **`https://github.com/ai-vnv/gym-duckietown.git`** (`daffy`), runs `pip install -e .`, and sets up a display (e.g. Xvfb) when needed. **No manual patching** of upstream `setup.py` is required when installing **this fork**.
+| Area | This fork |
+|------|-----------|
+| **Dependencies** | `numpy>=1.21,<2`, `pyglet>=1.5,<2` in `setup.py` |
+| **macOS** | Cocoa GL path in `check_hw.py`; no forced EGL-only |
+| **Headless Linux** | `DUCKIETOWN_HEADLESS=1` in `__init__.py` |
+| **PWM / NumPy** | `pwm_numpy_compat.py` loaded from `gym_duckietown/__init__.py` |
 
----
+**Fork-only features** (see [`docs/fork_features.rst`](docs/fork_features.rst) and [`scene_presets.py`](src/gym_duckietown/scene_presets.py)):
 
-## Introduction (original project)
-
-Gym-Duckietown places your agent (a Duckiebot) in a Duckietown map: roads, turns, intersections, obstacles, pedestrians, and other agents. It supports RL, imitation learning, classical control, domain randomization, and tools aimed at sim-to-real transfer.
-
-<p align="center">
-<img src="media/finalmain.gif"><br>
-</p>
-
-**Registered environments** (maps under `src/gym_duckietown` / packaged data) include:
-
-- `Duckietown-straight_road-v0`, `Duckietown-4way-v0`, `Duckietown-udem1-v0`
-- `Duckietown-small_loop-v0`, `Duckietown-small_loop_cw-v0`, `Duckietown-zigzag_dists-v0`
-- `Duckietown-loop_obstacles-v0`, `Duckietown-loop_pedestrians-v0`
-- `Duckietown-small_loop_arabian-v0`, `Duckietown-loop_obstacles_arabian-v0`, `Duckietown-udem1_arabian-v0` (**fork:** desert-style sky/ground; same geometry as the maps above)
-- `Duckietown-zigzag_dists_mining-v0` (**fork:** mining/off-road look on `zigzag_dists`; see [`scene_presets.py`](src/gym_duckietown/scene_presets.py))
-- `MultiMap-v0` (cycles maps), `Duckiebot-v0`
-
-Hardware and AIDO templates: see [Duckietown embodied docs](https://docs-old.duckietown.org/daffy/AIDO/out/embodied.html).
+- **Desert outdoor** — `Duckietown-*_arabian-v0`, warm sky / sand ground tint.
+- **Multiview** — `env.unwrapped.render_multiview_rgb()`; `scripts/demo_multiview.py` → `recordings/multiview_demo.mp4`.
+- **Mining preset** — `Duckietown-zigzag_dists_mining-v0`; `scripts/demo_mining_pit.py` → `recordings/mining_pit_multiview.mp4`.
+- **Mining + file textures** — `Duckietown-zigzag_dists_mining_gl-v0` (run `scripts/generate_mining_assets.py` first).
+- **Mining + procedural GL tiles** — `Duckietown-zigzag_dists_mining_prog-v0` (`custom_tile_textures`, no PNGs required).
+- **Procedural assets (offline)** — `scripts/generate_mining_assets.py`, `scripts/edit_obj.py`.
 
 ---
 
-## Usage (summary)
+## Media (regenerate locally)
 
-**Manual control:**
+MP4s are **gitignored** under `recordings/`. Run the scripts below, then open the files or embed them in slides / the pedagogy notebook.
+
+| Output (default path) | Command |
+|------------------------|---------|
+| `recordings/kfupm_style_udem1_arabian_20s.mp4` | `python scripts/render_kfupm_style_video.py` |
+| `recordings/multiview_demo.mp4` | `python scripts/demo_multiview.py` |
+| `recordings/mining_pit_multiview.mp4` | `python scripts/demo_mining_pit.py` |
+| `recordings/mining_prog_multiview.mp4` | `python scripts/demo_mining_pit.py --env-id Duckietown-zigzag_dists_mining_prog-v0 -o recordings/mining_prog_multiview.mp4` |
+| `recordings/failure_*.mp4` | `python scripts/record_pp_failures.py` |
+
+---
+
+## Registered environments (excerpt)
+
+Stock-style: `Duckietown-udem1-v0`, `Duckietown-small_loop-v0`, `Duckietown-zigzag_dists-v0`, …
+
+**Fork IDs:** `Duckietown-small_loop_arabian-v0`, `Duckietown-udem1_arabian-v0`, `Duckietown-zigzag_dists_mining-v0`, `Duckietown-zigzag_dists_mining_gl-v0`, `Duckietown-zigzag_dists_mining_prog-v0`, `MultiMap-v0`, `Duckiebot-v0`.
+
+---
+
+## Usage (quick)
 
 ```bash
 python manual_control.py --env-name Duckietown-udem1-v0
 ```
 
-**RL (code under `pytorch_rl/`):** install PyTorch, then e.g.:
-
-```bash
-python3 pytorch_rl/main.py --no-vis --env-name Duckietown-small_loop-v0 --algo a2c --lr 0.0002 --max-grad-norm 0.5 --num-steps 20
-```
-
-**Imitation learning:** see `experiments/` (e.g. `gen_demos.py`, `train_imitation.py`).  
-**Docker:** image `duckietown/gym-duckietown` on Docker Hub (upstream-maintained image; may differ from this fork’s dependency pins).
+RL / imitation / Docker: see upstream README and `pytorch_rl/`, `experiments/`.
 
 ---
 
-## Design (summary)
+## Design (short)
 
-- **Maps:** YAML tiles and objects; see packaged maps and [Duckietown specs](https://docs.duckietown.org/daffy/opmanual_duckietown/out/duckietown_specs.html).
-- **Observations:** camera images (shape depends on build; often 640×480 RGB in current `daffy`).
-- **Actions:** continuous `[velocity, steering]` in \([-1,1]\); see `DiscreteWrapper` for discrete actions.
-- **Reward / done:** lane following vs. centerline; episode ends on invalid pose or `max_steps`. Details in simulator / env code.
+- **Maps:** YAML in duckietown-world data; [Duckietown specs](https://docs.duckietown.org/daffy/opmanual_duckietown/out/duckietown_specs.html).
+- **Observations:** RGB camera (`Simulator` defaults, often 640×480).
+- **Actions:** continuous `[velocity, steering]` in \([-1,1]\).
 
 ---
 
 ## Troubleshooting
 
-- **No display (SSH/Docker):** use Xvfb or EGL headless; see upstream README sections on headless training.
-- **GLU / GL:** on Linux, `freeglut3-dev` etc.; **this fork** pins Pyglet 1.x to keep GLU bindings used by the code.
-- **More detail:** full legacy troubleshooting and conda/docker blocks live in the [upstream `README`](https://github.com/duckietown/gym-duckietown/blob/daffy/README.md) from Duckietown; **report fork-specific bugs** on [ai-vnv/gym-duckietown issues](https://github.com/ai-vnv/gym-duckietown/issues).
+- **No display (SSH/Linux):** Xvfb or EGL; install `freeglut3-dev` where needed. CI uses `xvfb-run -a pytest …`.
+- **Fork bugs:** [ai-vnv/gym-duckietown issues](https://github.com/ai-vnv/gym-duckietown/issues).
 
 ---
 
 <p align="center">
-<img src="media/duckiebot_1.png" width="300px"><br>
-<em>Duckiebot-v0 (concept)</em>
+<img src="media/simplesim_free.png" width="280" alt="simulator screenshot">
+<br>
+<img src="media/finalmain.gif" width="400" alt="duckietown demo gif">
 </p>

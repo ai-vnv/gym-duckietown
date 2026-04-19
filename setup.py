@@ -60,4 +60,11 @@ setup(
             "dt-check-gpu=gym_duckietown.check_hw:main",
         ],
     },
+    extras_require={
+        "dev": [
+            "pytest>=7.0",
+            "sphinx>=6.0,<8.0",
+            "sphinx-rtd-theme>=2.0",
+        ],
+    },
 )

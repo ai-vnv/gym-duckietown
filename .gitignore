@@ -13,6 +13,8 @@ requirements.resolved
 # Local dev / generated (fork maintenance)
 .venv/
 venv/
+docs/_build/
+.pytest_cache/
 recordings/*.mp4
 
 # Procedural mining pack (regenerate with scripts/generate_mining_assets.py)

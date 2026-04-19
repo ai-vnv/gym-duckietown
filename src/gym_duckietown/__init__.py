@@ -14,7 +14,8 @@ import pyglet
 
 on_mac = "Darwin" in platform.system()
 _force_headless = os.environ.get("DUCKIETOWN_HEADLESS", "").lower() in ("1", "true", "yes")
-print(pyglet.options)
+if not os.environ.get("GYM_DUCKIETOWN_SPHINX"):
+    print(pyglet.options)
 if _force_headless:
     pyglet.options["headless"] = True
 elif on_mac:
@@ -53,7 +54,12 @@ register(id="MultiMap-v0", entry_point="gym_duckietown.envs:MultiMapEnv", reward
 register(id="Duckiebot-v0", entry_point="gym_duckietown.envs:DuckiebotEnv", reward_threshold=400.0)
 
 # Experimental “Arabian desert outdoor” look: warm sky + sand ground (same maps, tinted horizon/ground).
-from .scene_presets import ARABIAN_DESERT_OUTDOOR, MINING_PIT_OUTDOOR
+from .scene_presets import (
+    ARABIAN_DESERT_OUTDOOR,
+    MINING_PIT_OUTDOOR,
+    MINING_PIT_OUTDOOR_GL,
+    MINING_PIT_OUTDOOR_PROG,
+)
 
 register(
     id="Duckietown-small_loop_arabian-v0",
@@ -80,6 +86,19 @@ register(
     entry_point="gym_duckietown.envs:DuckietownEnv",
     reward_threshold=400.0,
     kwargs={**MINING_PIT_OUTDOOR, "map_name": "zigzag_dists"},
+)
+# Mining preset + OpenGL tile textures from ``assets/mining_generated/*.png`` (generate first).
+register(
+    id="Duckietown-zigzag_dists_mining_gl-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**MINING_PIT_OUTDOOR_GL, "map_name": "zigzag_dists"},
+)
+register(
+    id="Duckietown-zigzag_dists_mining_prog-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**MINING_PIT_OUTDOOR_PROG, "map_name": "zigzag_dists"},
 )
 
 from .pwm_numpy_compat import apply_patch as _apply_pwm_numpy_compat

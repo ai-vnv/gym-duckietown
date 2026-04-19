@@ -1,0 +1,50 @@
+{
+  "spec_name": "gym-duckietown-procedural-tile-textures",
+  "spec_version": "1.0.0",
+  "description": "V&V-style requirement register for in-memory tile textures. Compatible with ai-vnv/vnvspec evidence workflows (import as data when using Python 3.11+).",
+  "requirements": [
+    {
+      "id": "DT-PT-01",
+      "statement": "Procedural tile generators shall accept both numpy.random.Generator and legacy RandomState without raising.",
+      "category": "correctness",
+      "suggested_tests": ["tests/test_procedural_tile_textures.py::test_rng_helpers_work_with_randomstate_and_generator", "tests/test_procedural_tile_textures.py::test_mining_rgb_shapes_and_dtype"],
+      "standards": {"nist_ai_rmf": ["MAP-1.3"]}
+    },
+    {
+      "id": "DT-PT-02",
+      "statement": "Callable custom_tile_textures shall return H×W×3 or H×W×4 uint8 arrays with values in [0,255] suitable for GL upload.",
+      "category": "correctness",
+      "suggested_tests": ["tests/test_procedural_tile_textures.py::test_mining_rgb_shapes_and_dtype", "tests/test_procedural_tile_textures.py::test_mining_procedural_dict_callables"]
+    },
+    {
+      "id": "DT-PT-03",
+      "statement": "load_texture_from_rgba shall coerce RGB to RGBA, set GL_UNPACK_ALIGNMENT to 1, and optionally resize to power-of-two dimensions.",
+      "category": "robustness",
+      "suggested_tests": ["tests/test_procedural_tile_textures.py::test_pot_resize_and_rgba_expand", "tests/test_procedural_tile_textures.py::test_load_texture_from_rgba_gl_upload"]
+    },
+    {
+      "id": "DT-PT-04",
+      "statement": "On each reset, only tile kinds present on the map shall trigger materialization and at most one GL texture upload per configured key used.",
+      "category": "performance",
+      "suggested_tests": ["manual: profile reset() with large maps", "code review: _rebuild_programmatic_tile_gl_textures"]
+    },
+    {
+      "id": "DT-PT-05",
+      "statement": "custom_tile_textures shall take precedence over custom_tile_texture_paths for the same logical tile.",
+      "category": "correctness",
+      "suggested_tests": ["manual: pass both maps and confirm procedural pixels", "future unit: mock load_texture"]
+    },
+    {
+      "id": "DT-PT-06",
+      "statement": "Registered env Duckietown-zigzag_dists_mining_prog-v0 shall reset and produce rgb_array observations without corruption (finite, expected shape).",
+      "category": "integration",
+      "suggested_tests": ["tests/test_procedural_tile_textures.py::test_mining_prog_env_reset_and_render"]
+    },
+    {
+      "id": "DT-PT-07",
+      "statement": "max_side shall cap texture resolution before upload to avoid exceeding GL_MAX_TEXTURE_SIZE on constrained GPUs.",
+      "category": "robustness",
+      "suggested_tests": ["future: parametrize load_texture_from_rgba with large synthetic array"]
+    }
+  ]
+}

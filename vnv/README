@@ -1,0 +1,9 @@
+Procedural tile V&V
+--------------------
+- ``procedural_tiles_vnvspec.json`` — requirement IDs, statements, suggested pytest nodes, optional standard hooks (NIST AI RMF example).
+- The PyPI package ``vnvspec`` (https://github.com/ai-vnv/vnvspec) requires **Python ≥3.11**; this repo’s default venv is 3.10, so the JSON is the portable artifact until you upgrade or load the file from a 3.11+ tool.
+
+Run linked tests (also run in GitHub Actions CI on ``daffy``):
+
+  pip install -e ".[dev]"
+  python -m pytest tests/test_procedural_tile_textures.py -v
