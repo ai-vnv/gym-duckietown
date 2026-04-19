@@ -46,6 +46,7 @@ This fork is maintained for **ai-vnv** lab use: keep compatibility with upstream
 - [`notebooks/gym_duckietown_pedagogy.ipynb`](notebooks/gym_duckietown_pedagogy.ipynb) — pedagogy / falsification demo (uses this repo’s clone URL in Colab).
 - [`scripts/record_pp_failures.py`](scripts/record_pp_failures.py) — short MP4 recordings of Pure Pursuit failure modes.
 - **Arabian desert outdoor** — warm sky + sand ground tint (same maps; `domain_rand=False` for stable colors). Env IDs: `Duckietown-small_loop_arabian-v0`, `Duckietown-loop_obstacles_arabian-v0`, `Duckietown-udem1_arabian-v0` (stock **udem1** campus road layout + desert look — closest built-in proxy for a large university site; not georeferenced to any real campus). Preset: [`scene_presets.py`](src/gym_duckietown/scene_presets.py); demo rollouts: [`scripts/experiment_arabian_desert.py`](scripts/experiment_arabian_desert.py); 20s clip: `python scripts/render_kfupm_style_video.py` → `recordings/kfupm_style_udem1_arabian_20s.mp4`.
+- **Multiview (2×2)** — driver, whole-map bird’s-eye, top-follow, and rear cameras in one RGB panel: `env.unwrapped.render_multiview_rgb()` on any `DuckietownEnv`, or wrap with `gym_duckietown.wrappers.MultiViewObservationWrapper` (four extra full renders per step — for video/demos). Example: `python scripts/demo_multiview.py` → `recordings/multiview_demo.mp4`.
 
 ---
 

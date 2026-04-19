@@ -225,3 +225,24 @@ class UndistortWrapper(gym.ObservationWrapper):
             )
 
         return cv2.remap(observation, self.mapx, self.mapy, cv2.INTER_NEAREST)
+
+
+class MultiViewObservationWrapper(gym.ObservationWrapper):
+    """
+    Replace the default onboard RGB observation with a 2×2 multiview panel from
+    :meth:`gym_duckietown.simulator.Simulator.render_multiview_rgb`.
+
+    Each ``step`` runs the normal simulator (which already renders the ego view
+    internally) and then **four** additional full renders for the panel — use for
+    demos and debugging, not high-throughput training.
+    """
+
+    def __init__(self, env, labels: bool = True):
+        super().__init__(env)
+        self._mv_labels = labels
+        sim = env.unwrapped
+        h, w = int(sim.camera_height), int(sim.camera_width)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(h, w, 3), dtype=np.uint8)
+
+    def observation(self, observation):
+        return self.unwrapped.render_multiview_rgb(labels=self._mv_labels)

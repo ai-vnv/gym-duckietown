@@ -172,6 +172,18 @@ DEFAULT_FRAME_SKIP = 1
 
 DEFAULT_ACCEPT_START_ANGLE_DEG = 60
 
+# Extra render modes for _render_img(..., camera_mode=...). "map_topdown" matches legacy top_down=True.
+CAMERA_MODES_EGO = "ego"
+CAMERA_MODES_MAP_TOPDOWN = "map_topdown"
+CAMERA_MODES_TOP_FOLLOW = "top_follow"
+CAMERA_MODES_REAR = "rear"
+CAMERA_MODES = (
+    CAMERA_MODES_EGO,
+    CAMERA_MODES_MAP_TOPDOWN,
+    CAMERA_MODES_TOP_FOLLOW,
+    CAMERA_MODES_REAR,
+)
+
 REWARD_INVALID_POSE = -1000
 
 MAX_SPAWN_ATTEMPTS = 5000
@@ -1713,14 +1725,22 @@ class Simulator(gym.Env):
         img_array,
         top_down: bool = True,
         segment: bool = False,
+        camera_mode: Optional[str] = None,
     ) -> np.ndarray:
         """
         Render an image of the environment into a frame buffer
         Produce a numpy RGB array image as output
+
+        :param camera_mode: When set, selects the camera rig (``CAMERA_MODES``) and
+            ``top_down`` is ignored for placement. ``None`` keeps legacy behaviour:
+            ``top_down=True`` → map bird's-eye, ``False`` → onboard driver camera.
         """
 
         if not self.graphics:
             return np.zeros((height, width, 3), np.uint8)
+
+        width = int(width)
+        height = int(height)
 
         # Switch to the default context
         # This is necessary on Linux nvidia drivers
@@ -1768,22 +1788,30 @@ class Simulator(gym.Env):
         if self.domain_rand:
             pos = pos + self.randomization_settings["camera_noise"]
 
+        if camera_mode is not None:
+            if camera_mode not in CAMERA_MODES:
+                raise ValueError("camera_mode must be one of %s, got %r" % (CAMERA_MODES, camera_mode))
+            mode = camera_mode
+        else:
+            mode = CAMERA_MODES_MAP_TOPDOWN if top_down else CAMERA_MODES_EGO
+
         x, y, z = pos + self.cam_offset
         dx, dy, dz = get_dir_vec(angle)
         gl.glMatrixMode(gl.GL_MODELVIEW)
         gl.glLoadIdentity()
 
-        if self.draw_bbox:
-            y += 0.8
-            gl.glRotatef(90, 1, 0, 0)
-        elif not top_down:
-            y += self.cam_height
-            gl.glRotatef(self.cam_angle[0], 1, 0, 0)
-            gl.glRotatef(self.cam_angle[1], 0, 1, 0)
-            gl.glRotatef(self.cam_angle[2], 0, 0, 1)
-            gl.glTranslatef(0, 0, CAMERA_FORWARD_DIST)
+        if mode == CAMERA_MODES_EGO:
+            if self.draw_bbox:
+                y += 0.8
+                gl.glRotatef(90, 1, 0, 0)
+            else:
+                y += self.cam_height
+                gl.glRotatef(self.cam_angle[0], 1, 0, 0)
+                gl.glRotatef(self.cam_angle[1], 0, 1, 0)
+                gl.glRotatef(self.cam_angle[2], 0, 0, 1)
+                gl.glTranslatef(0, 0, CAMERA_FORWARD_DIST)
 
-        if top_down:
+        if mode == CAMERA_MODES_MAP_TOPDOWN:
             a = (self.grid_width * self.road_tile_size) / 2
             b = (self.grid_height * self.road_tile_size) / 2
             fov_y_deg = self.cam_fov_y
@@ -1796,11 +1824,31 @@ class Simulator(gym.Env):
             look_at = a, 0.0, b - 0.01
             up_vector = 0.0, 1.0, 0
             gl.gluLookAt(*look_from, *look_at, *up_vector)
-        else:
+        elif mode == CAMERA_MODES_EGO:
             look_from = x, y, z
             look_at = x + dx, y + dy, z + dz
             up_vector = 0.0, 1.0, 0.0
             gl.gluLookAt(*look_from, *look_at, *up_vector)
+        elif mode == CAMERA_MODES_TOP_FOLLOW:
+            px, py, pz = float(pos[0]), float(pos[1]), float(pos[2])
+            orbit_h = 2.8  # must not shadow parameter ``height`` (framebuffer pixel height)
+            lead = 0.03
+            look_from = (px, py + orbit_h, pz)
+            look_at = (px + dx * lead, 0.02, pz + dz * lead)
+            horiz_len = math.sqrt(dx * dx + dz * dz) or 1.0
+            up_vector = (dx / horiz_len, 0.0, dz / horiz_len)
+            gl.gluLookAt(*look_from, *look_at, *up_vector)
+        elif mode == CAMERA_MODES_REAR:
+            px, py, pz = float(pos[0]), float(pos[1]), float(pos[2])
+            back = 0.32
+            cam_x = px - dx * back
+            cam_y = py + 0.10
+            cam_z = pz - dz * back
+            look_depth = 0.88
+            lax = px - dx * look_depth
+            lay = py + 0.04
+            laz = pz - dz * look_depth
+            gl.gluLookAt(cam_x, cam_y, cam_z, lax, lay, laz, 0.0, 1.0, 0.0)
 
         # Draw the ground quad
         gl.glDisable(gl.GL_TEXTURE_2D)
@@ -1917,11 +1965,11 @@ class Simulator(gym.Env):
             gl.glVertex3f(corners[3, 0], 0.01, corners[3, 1])
             gl.glEnd()
 
-        if top_down:
+        if mode in (CAMERA_MODES_MAP_TOPDOWN, CAMERA_MODES_TOP_FOLLOW, CAMERA_MODES_REAR):
             gl.glPushMatrix()
             gl.glTranslatef(*self.cur_pos)
             gl.glScalef(1, 1, 1)
-            gl.glRotatef(self.cur_angle * 180 / np.pi, 0, 1, 0)
+            gl.glRotatef(float(self.cur_angle) * 180.0 / math.pi, 0, 1, 0)
             # glColor3f(*self.color)
             self.mesh.render()
             gl.glPopMatrix()
@@ -1931,7 +1979,18 @@ class Simulator(gym.Env):
         # Resolve the multisampled frame buffer into the final frame buffer
         gl.glBindFramebuffer(gl.GL_READ_FRAMEBUFFER, multi_fbo)
         gl.glBindFramebuffer(gl.GL_DRAW_FRAMEBUFFER, final_fbo)
-        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.GL_COLOR_BUFFER_BIT, gl.GL_LINEAR)
+        gl.glBlitFramebuffer(
+            0,
+            0,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height,
+            gl.GL_COLOR_BUFFER_BIT,
+            gl.GL_LINEAR,
+        )
 
         # Copy the frame buffer contents into a numpy array
         # Note: glReadPixels reads starting from the lower left corner
@@ -1949,6 +2008,71 @@ class Simulator(gym.Env):
         img_array = np.ascontiguousarray(np.flip(img_array, axis=0))
 
         return img_array
+
+    def render_multiview_rgb(self, segment: bool = False, labels: bool = True) -> np.ndarray:
+        """
+        Four views in one RGB image (2×2): driver (ego), whole-map bird's-eye,
+        perspective top camera that follows the agent, and a rear / backup camera.
+
+        Layout::
+
+            [ driver (ego) ] [ map bird's-eye ]
+            [ top follow   ] [ rear           ]
+
+        Resolution matches a single onboard frame (``camera_height`` × ``camera_width``).
+        Fish-eye distortion is applied only to the driver quadrant, matching ``render_obs``.
+
+        Note: this performs four full GL renders per call; use for visualization / video,
+        not inside tight RL training loops unless you accept the cost.
+        """
+        cw, ch = int(self.camera_width), int(self.camera_height)
+        tw, th = cw // 2, ch // 2
+        order = (
+            CAMERA_MODES_EGO,
+            CAMERA_MODES_MAP_TOPDOWN,
+            CAMERA_MODES_TOP_FOLLOW,
+            CAMERA_MODES_REAR,
+        )
+        raw_tiles = []
+        for m in order:
+            img = self._render_img(
+                cw,
+                ch,
+                self.multi_fbo,
+                self.final_fbo,
+                self.img_array,
+                top_down=False,
+                segment=segment,
+                camera_mode=m,
+            )
+            if m == CAMERA_MODES_EGO and self.distortion and not self.undistort:
+                img = self.camera_model.distort(img)
+            raw_tiles.append(np.ascontiguousarray(img))
+        # Import cv2 only after all GL reads: loading cv2 before/during GL calls can break
+        # Pyglet's glBlitFramebuffer ctypes bindings on macOS (opencv loads another OpenGL stack).
+        import cv2  # noqa: WPS433
+
+        tiles = [cv2.resize(t, (tw, th), interpolation=cv2.INTER_AREA) for t in raw_tiles]
+        top_row = np.concatenate([tiles[0], tiles[1]], axis=1)
+        bot_row = np.concatenate([tiles[2], tiles[3]], axis=1)
+        out = np.concatenate([top_row, bot_row], axis=0)
+        if labels:
+            panel_bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+            captions = ("driver (ego)", "map bird's-eye", "top follow", "rear")
+            origins = ((5, 22), (tw + 5, 22), (5, th + 22), (tw + 5, th + 22))
+            for text, (ox, oy) in zip(captions, origins):
+                cv2.putText(
+                    panel_bgr,
+                    text,
+                    (ox, oy),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.52,
+                    (240, 240, 240),
+                    1,
+                    cv2.LINE_AA,
+                )
+            out = cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2RGB)
+        return out
 
     def render_obs(self, segment: bool = False) -> np.ndarray:
         """
