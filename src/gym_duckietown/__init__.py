@@ -67,6 +67,13 @@ register(
     reward_threshold=400.0,
     kwargs={**ARABIAN_DESERT_OUTDOOR, "map_name": "loop_obstacles"},
 )
+# Campus-scale road network (duckietown-world “udem1”) + desert outdoor tint — closest stock proxy for a large university site (e.g. KFUPM-style) in this simulator.
+register(
+    id="Duckietown-udem1_arabian-v0",
+    entry_point="gym_duckietown.envs:DuckietownEnv",
+    reward_threshold=400.0,
+    kwargs={**ARABIAN_DESERT_OUTDOOR, "map_name": "udem1"},
+)
 
 from .pwm_numpy_compat import apply_patch as _apply_pwm_numpy_compat
 
