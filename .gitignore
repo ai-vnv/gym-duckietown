@@ -21,3 +21,10 @@ recordings/*.mp4
 assets/mining_generated/*.png
 assets/mining_generated/*.obj
 assets/mining_generated/*.mtl
+
+# RL training artefacts. Checkpoints + replay buffers are large (and go to
+# the SSD by default — see scripts/rl/common.py). wandb/ is the local sync
+# cache for the W&B client; the source of truth is the cloud.
+wandb/
+checkpoints/
+runs/

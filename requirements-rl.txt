@@ -1,0 +1,18 @@
+# RL training stack — install separately from setup.py.
+#
+# The repo's existing dependencies pull in legacy `gym` (0.26.x) for the
+# simulator's own gym integration. We use **gymnasium** + **SB3 2.x** for
+# the RL stack — they coexist with legacy `gym` in the same venv.
+#
+#   pip install -r requirements-rl.txt
+stable-baselines3>=2.2,<3
+sb3-contrib>=2.2,<3
+gymnasium>=0.29,<1
+wandb>=0.16
+torch>=2.2
+torchvision>=0.17
+tensorboard>=2.15
+opencv-python-headless>=4.8
+imageio>=2.31
+imageio-ffmpeg>=0.4
+moviepy>=1.0.3
