@@ -185,43 +185,90 @@ class RuleAwareController:
         stop_signs: Optional[List[StopSign]] = None,
         traffic_lights: Optional[List[TrafficLight]] = None,
         dt: float = 1.0 / 20.0,
+        decel_time_s: float = 0.6,
+        accel_time_s: float = 0.4,
     ) -> None:
         self.base = base
         self.agent_pose_fn = agent_pose_fn
         self.stop_signs: List[StopSign] = list(stop_signs or [])
         self.traffic_lights: List[TrafficLight] = list(traffic_lights or [])
         self.dt = float(dt)
+        self.decel_time = float(decel_time_s)
+        self.accel_time = float(accel_time_s)
         self.t = 0.0
+
+        # Live state, exposed for the dashboard + telemetry log.
+        self.effective_mult: float = 1.0           # smoothed gate multiplier
+        self.target_mult: float = 1.0              # raw mult from rules this step
+        self.brake: float = 0.0                    # 0..1 brake-pedal proxy
+        self.in_stop_zone: List[bool] = []         # per stop sign
+        self.stop_satisfied: List[bool] = []       # per stop sign
+        self.stop_clock: List[Optional[float]] = []
+        self.in_tl_zone: List[bool] = []           # per traffic light
+        self.tl_color: List[str] = []              # per traffic light
 
     def reset(self) -> None:
         self.t = 0.0
+        self.effective_mult = 1.0
+        self.brake = 0.0
         for ss in self.stop_signs:
             ss.reset()
 
     def __call__(self, observation: Any, t: Optional[float] = None) -> np.ndarray:
         action = np.asarray(self.base(observation), dtype=np.float32).copy()
+        advance_time = t is None
         if t is None:
             t = self.t
 
         x, z, speed = self.agent_pose_fn()
         pose = (float(x), float(z))
 
-        mult = 1.0
+        # Per-rule state for telemetry
+        self.in_stop_zone = []
+        self.stop_satisfied = []
+        self.stop_clock = []
+        self.in_tl_zone = []
+        self.tl_color = []
+
+        target_mult = 1.0
         for ss in self.stop_signs:
+            dx = pose[0] - ss.position[0]
+            dz = pose[1] - ss.position[1]
+            in_zone = (dx * dx + dz * dz) ** 0.5 <= ss.trigger_radius
+            self.in_stop_zone.append(in_zone)
             if ss.update(pose, float(speed), float(t)):
-                mult = 0.0
+                target_mult = 0.0
+            self.stop_satisfied.append(ss.satisfied)
+            self.stop_clock.append(ss.stopped_at_time)
         for tl in self.traffic_lights:
+            dx = pose[0] - tl.position[0]
+            dz = pose[1] - tl.position[1]
+            in_zone = (dx * dx + dz * dz) ** 0.5 <= tl.trigger_radius
+            self.in_tl_zone.append(in_zone)
+            self.tl_color.append(tl.color_at(float(t)))
             f = tl.speed_multiplier(pose, float(t))
             if f is not None:
-                mult = min(mult, f)
+                target_mult = min(target_mult, f)
+        self.target_mult = target_mult
 
-        action[0] = float(action[0]) * mult
-        # Differential-drive: with v=0 and omega!=0 the wheels turn in
-        # opposite directions and the bot spins in place. Force omega to 0
-        # as well so a "full stop" actually holds still.
-        if mult <= 0.0:
+        # Smoothly slew effective_mult toward target_mult — eliminates the
+        # abrupt zero-everything stop and creates a real braking phase.
+        if target_mult < self.effective_mult:
+            step = self.dt / max(1e-3, self.decel_time)
+            new_mult = max(target_mult, self.effective_mult - step)
+        else:
+            step = self.dt / max(1e-3, self.accel_time)
+            new_mult = min(target_mult, self.effective_mult + step)
+        # Brake intensity: how fast the gate is dropping (0 .. 1).
+        self.brake = max(0.0, (self.effective_mult - new_mult) / max(step, 1e-3))
+        self.effective_mult = new_mult
+
+        action[0] = float(action[0]) * self.effective_mult
+        # Diff-drive: if effective mult is near zero, also gate omega to
+        # avoid in-place spinning while the rule asks for a halt.
+        if self.effective_mult < 0.05:
             action[1] = 0.0
-        if t is None or t == self.t:
+        if advance_time:
             self.t += self.dt
         return action
 

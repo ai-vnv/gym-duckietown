@@ -396,12 +396,17 @@ def _jisr3_stop_signs(sim) -> List[StopSign]:
     return [
         StopSign(
             position=(sign_x, sign_z),
-            trigger_radius=0.45,  # bot is ~0.39 m east of the sign; 0.45 covers approach + dwell
+            # The bot's lateral position drifts ~1-2 cm between laps; with
+            # the sign 0.39 m perpendicular from the centerline, a tight
+            # 0.45 m radius grazes the boundary on later laps and the bot
+            # escapes before the dwell completes. 0.60 m gives a wide
+            # enough zone (>2 s of bot-traversal) for every lap.
+            trigger_radius=0.60,
             required_stop_time_s=3.0,
             # The duckiebot's actuator has a ~0.15 s delay, so even when the
-            # rule commands action=(0,0) the wheel velocity decays over a few
-            # frames. Residual sim.speed sits ~0.06 m/s. We need the threshold
-            # above that residual or the dwell clock never starts.
+            # rule commands action=(0,0) the wheel velocity decays over a
+            # few frames. Residual sim.speed sits ~0.06 m/s. We need the
+            # threshold above that residual or the dwell clock never starts.
             stop_speed_threshold=0.10,
         ),
     ]

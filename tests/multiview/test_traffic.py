@@ -121,38 +121,45 @@ def test_rule_controller_no_rules_is_pass_through():
     assert np.allclose(out, [0.6, 0.2])
 
 
-def test_rule_controller_stop_sign_zeroes_velocity_and_steering():
-    """Diff-drive: with v=0 the bot will spin in place unless we also zero omega."""
+def _step_until_settled(ctrl, n_steps=200):
+    out = None
+    for _ in range(n_steps):
+        out = ctrl(None)
+    return out
+
+
+def test_rule_controller_stop_sign_zeroes_velocity_and_steering_after_decel():
+    """After the deceleration ramp completes, both v and omega gate to 0."""
     base = _ConstBase(v=0.7, omega=0.4)
     ss = StopSign(position=(0, 0), trigger_radius=0.5, required_stop_time_s=0.2)
-    pose = [(0.1, 0.0, 0.7)]  # in range, moving
+    pose = [(0.1, 0.0, 0.7)]  # in range, moving — rule must keep firing must_stop
     ctrl = RuleAwareController(
         base=base,
         agent_pose_fn=lambda: pose[0],
         stop_signs=[ss],
         dt=0.05,
+        decel_time_s=0.6,
     )
-    out = ctrl(None)
+    out = _step_until_settled(ctrl)
     assert out[0] == pytest.approx(0.0)
     assert out[1] == pytest.approx(0.0)  # forced to 0 to prevent spin-in-place
 
 
-def test_rule_controller_traffic_light_red_zeroes_velocity_and_steering():
+def test_rule_controller_traffic_light_red_settles_at_zero():
     base = _ConstBase(v=0.5, omega=0.3)
     tl = TrafficLight(
         position=(0, 0), trigger_radius=1.0, cycle_s=10.0, green_frac=0.0, yellow_frac=0.0,
-        # all red
     )
     ctrl = RuleAwareController(
         base=base, agent_pose_fn=lambda: (0.1, 0.0, 0.5), traffic_lights=[tl], dt=0.05
     )
-    out = ctrl(None)
+    out = _step_until_settled(ctrl)
     assert out[0] == pytest.approx(0.0)
     assert out[1] == pytest.approx(0.0)
 
 
-def test_rule_controller_yellow_keeps_steering():
-    """Partial slowdown (yellow) must pass omega through unchanged."""
+def test_rule_controller_yellow_keeps_steering_after_settle():
+    """Partial slowdown (yellow) → v scaled, omega passes through."""
     base = _ConstBase(v=0.5, omega=0.3)
     tl = TrafficLight(
         position=(0, 0), trigger_radius=1.0, cycle_s=10.0, green_frac=0.0, yellow_frac=1.0,
@@ -161,15 +168,15 @@ def test_rule_controller_yellow_keeps_steering():
     ctrl = RuleAwareController(
         base=base, agent_pose_fn=lambda: (0.1, 0.0, 0.5), traffic_lights=[tl], dt=0.05
     )
-    out = ctrl(None)
-    assert out[0] == pytest.approx(0.20)  # 0.5 * 0.4
-    assert out[1] == pytest.approx(0.30)  # unchanged
+    out = _step_until_settled(ctrl)
+    assert out[0] == pytest.approx(0.20, abs=1e-3)  # 0.5 * 0.4
+    assert out[1] == pytest.approx(0.30, abs=1e-3)  # unchanged (mult > 0.05)
 
 
 def test_rule_controller_strictest_rule_wins():
-    """If stop sign demands stop AND traffic light is green, v stays 0."""
+    """If stop sign demands stop AND traffic light is green, v settles at 0."""
     base = _ConstBase(v=0.5, omega=0.0)
-    ss = StopSign(position=(0, 0), trigger_radius=0.5, required_stop_time_s=99.0)  # never satisfied here
+    ss = StopSign(position=(0, 0), trigger_radius=0.5, required_stop_time_s=99.0)
     tl = TrafficLight(
         position=(0, 0), trigger_radius=1.0, cycle_s=10.0, green_frac=1.0, yellow_frac=0.0
     )
@@ -180,7 +187,7 @@ def test_rule_controller_strictest_rule_wins():
         traffic_lights=[tl],
         dt=0.05,
     )
-    out = ctrl(None)
+    out = _step_until_settled(ctrl)
     assert out[0] == pytest.approx(0.0)
 
 

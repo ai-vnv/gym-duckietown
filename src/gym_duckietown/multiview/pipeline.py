@@ -7,6 +7,8 @@ import the lower-level pieces and write your own loop.
 """
 from __future__ import annotations
 
+import csv
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -54,6 +56,7 @@ class RolloutConfig:
     side_cam_pitch_deg: float = -8.0
     cam_fov_y: float = 110.0  # vertical FOV (deg). Sim default 75 → 110 is ultra-wide.
     driver_pitch_deg: float = 8.0  # sim default 19.15 — too downward; 8 shows periphery better
+    log_csv: Optional[str] = None  # path; auto-derived from output if None
     vantage_from: Optional[tuple] = None  # (x, y, z); None → SW corner default
     vantage_at: Optional[tuple] = None  # (x, y, z); None → map center
     traj_window_sec: Optional[float] = None
@@ -98,6 +101,24 @@ def run_rollout(
         sim.cam_angle[0] = float(config.driver_pitch_deg)
     obs = sim.render_obs()
 
+    # Telemetry log — auto-derives from output path if not specified.
+    log_path = config.log_csv
+    if log_path is None:
+        base, _ext = os.path.splitext(config.output)
+        log_path = base + "_telemetry.csv"
+    log_file = open(log_path, "w", newline="")
+    log_writer = csv.writer(log_file)
+    log_writer.writerow([
+        "step", "time_s",
+        "pos_x", "pos_z", "heading_rad",
+        "speed_mps", "ang_vel_rad_s",
+        "action_v", "action_omega",
+        "effective_mult", "brake", "target_mult",
+        "in_stop_zone", "stop_satisfied", "stop_clock_s",
+        "in_tl_zone", "tl_color",
+        "odometer_m",
+    ])
+
     panel = TrajectoryPanel(sim, h=config.tile_height, w=config.tile_width)
 
     os.makedirs(os.path.dirname(config.output) or ".", exist_ok=True)
@@ -120,6 +141,8 @@ def run_rollout(
     last_action = (0.0, 0.0)
     odometer = 0.0
     last_pos = None
+    last_angle: Optional[float] = None
+    ang_vel = 0.0
     t0 = time.time()
 
     dt = 1.0 / float(config.fps)
@@ -152,13 +175,21 @@ def run_rollout(
             # 0.10 m/s as effectively stationary in the dashboard.
             _raw_speed = float(getattr(sim, "speed", 0.0))
             _disp_speed = 0.0 if abs(_raw_speed) < 0.10 else _raw_speed
+            # angular velocity from successive cur_angle
+            cur_ang = float(getattr(sim, "cur_angle", 0.0))
+            if last_angle is not None:
+                # smallest signed angle delta
+                da = (cur_ang - last_angle + math.pi) % (2 * math.pi) - math.pi
+                ang_vel = da / dt
+            # brake (0..1): set by RuleAwareController; falls back to 0 for plain controllers
+            brake = float(getattr(controller, "brake", 0.0))
             metrics = {
                 "speed":   f"{_disp_speed:.2f} m/s",
+                "gas":     f"{max(0.0, float(last_action[0])):+.2f}",
+                "brake":   f"{brake:.2f}",
                 "steer":   f"{float(last_action[1]):+.2f}",
-                "pedal":   f"{float(last_action[0]):+.2f}",
                 "odo":     f"{odometer:.1f} m",
                 "time":    f"{step_idx * dt:5.1f} s",
-                "step":    f"{step_idx + 1}/{total}",
             }
             traj_img = panel.render(xs, zs, metrics=metrics)
             frame = compose_frame(
@@ -171,6 +202,31 @@ def run_rollout(
 
             action = controller(obs)
             last_action = (float(action[0]), float(action[1]))
+
+            # --- CSV telemetry row (one per rendered frame) -----------------
+            ctrl_state = controller  # may be a RuleAwareController (exposes state)
+            in_stop = getattr(ctrl_state, "in_stop_zone", []) or [False]
+            stop_sat = getattr(ctrl_state, "stop_satisfied", []) or [False]
+            stop_clk = getattr(ctrl_state, "stop_clock", []) or [None]
+            in_tl = getattr(ctrl_state, "in_tl_zone", []) or [False]
+            tl_col = getattr(ctrl_state, "tl_color", []) or [""]
+            log_writer.writerow([
+                step_idx, f"{step_idx * dt:.3f}",
+                f"{float(x):.4f}", f"{float(z):.4f}", f"{cur_ang:.4f}",
+                f"{_raw_speed:.4f}", f"{ang_vel:.4f}",
+                f"{last_action[0]:.4f}", f"{last_action[1]:.4f}",
+                f"{float(getattr(ctrl_state, 'effective_mult', 1.0)):.3f}",
+                f"{brake:.3f}",
+                f"{float(getattr(ctrl_state, 'target_mult', 1.0)):.3f}",
+                int(any(in_stop)),
+                int(any(stop_sat)),
+                (f"{stop_clk[0]:.3f}" if stop_clk and stop_clk[0] is not None else ""),
+                int(any(in_tl)),
+                ";".join(tl_col),
+                f"{odometer:.3f}",
+            ])
+            last_angle = cur_ang
+
             obs, _r, done, _info = env.step(action)
             if done:
                 print(
@@ -193,5 +249,6 @@ def run_rollout(
                     )
     finally:
         writer.close()
+        log_file.close()
 
     return written
