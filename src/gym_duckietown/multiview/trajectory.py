@@ -6,7 +6,7 @@ the polyline and current-position dot are redrawn.
 """
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -28,10 +28,14 @@ class TrajectoryPanel:
     BG_COLOR = (26, 26, 26)
     TILE_FILL = (58, 58, 58)
     TILE_EDGE = (90, 90, 90)
-    PATH_COLOR = (74, 210, 255)
+    PATH_COLOR = (74, 210, 255)       # newest segment colour
+    PATH_FADE_COLOR = (58, 58, 58)    # oldest segments dim toward the tile fill
     HEAD_COLOR = (90, 90, 255)
     TITLE_COLOR = (238, 238, 238)
+    METRIC_COLOR = (230, 230, 230)
     TITLE_BAND_HEIGHT = 26
+    METRIC_STRIP_HEIGHT = 56          # bottom area reserved for dashboard text
+    FADE_BUCKETS = 40                 # color-bucket count for polyline fade
 
     def __init__(self, sim, h: int, w: int, pad: float = 0.15):
         import cv2  # local import; cv2 must not load before GL on macOS
@@ -80,22 +84,84 @@ class TrajectoryPanel:
         py = int(round((z + self.pad) * self.scale + self.off_y))
         return px, py
 
-    def render(self, xs: Sequence[float], zs: Sequence[float]) -> np.ndarray:
-        """Return an HxWx3 uint8 RGB frame for the given trajectory."""
+    def render(
+        self,
+        xs: Sequence[float],
+        zs: Sequence[float],
+        metrics: Optional[dict] = None,
+    ) -> np.ndarray:
+        """Return an HxWx3 uint8 RGB frame for the given trajectory.
+
+        ``metrics`` is an optional ordered mapping of ``label -> value_str``
+        rendered as a dashboard strip at the bottom of the panel.
+        """
         import cv2
 
         img = self._background.copy()
-        if len(xs) >= 2:
+        n = len(xs)
+        if n >= 2:
             pts = np.array(
                 [self.world_to_px(x, z) for x, z in zip(xs, zs)], dtype=np.int32
-            ).reshape(-1, 1, 2)
-            cv2.polylines(
-                img, [pts], isClosed=False, color=self.PATH_COLOR, thickness=2, lineType=16
             )
-        if len(xs) >= 1:
+            # Bucketed colour fade: split the polyline into chunks and draw
+            # each chunk with a colour interpolated between PATH_FADE_COLOR
+            # (oldest) and PATH_COLOR (newest). Much cheaper than per-segment
+            # drawing for long trajectories.
+            n_buckets = min(self.FADE_BUCKETS, n - 1)
+            bucket_size = max(1, (n - 1) // n_buckets)
+            for b in range(n_buckets):
+                i0 = b * bucket_size
+                i1 = (b + 1) * bucket_size if b < n_buckets - 1 else (n - 1)
+                # extend by 1 so consecutive buckets share an endpoint -> no gaps
+                i1_inclusive = min(i1 + 1, n)
+                # Normalise on the bucket's *upper* index so the newest
+                # bucket lands exactly on PATH_COLOR (t=1.0).
+                t = i1 / max(1, n - 1)
+                col = (
+                    int(self.PATH_FADE_COLOR[0] * (1 - t) + self.PATH_COLOR[0] * t),
+                    int(self.PATH_FADE_COLOR[1] * (1 - t) + self.PATH_COLOR[1] * t),
+                    int(self.PATH_FADE_COLOR[2] * (1 - t) + self.PATH_COLOR[2] * t),
+                )
+                segment = pts[i0:i1_inclusive].reshape(-1, 1, 2)
+                cv2.polylines(
+                    img, [segment], isClosed=False, color=col, thickness=2, lineType=16
+                )
+        if n >= 1:
             cx, cy = self.world_to_px(xs[-1], zs[-1])
             cv2.circle(img, (cx, cy), 4, self.HEAD_COLOR, thickness=-1, lineType=16)
+
+        if metrics:
+            self._draw_metrics(img, metrics)
         return img
+
+    def _draw_metrics(self, img: np.ndarray, metrics: dict) -> None:
+        """Semi-transparent dashboard strip at the bottom of the panel."""
+        import cv2
+
+        h, w = img.shape[:2]
+        strip_h = self.METRIC_STRIP_HEIGHT
+        # Dim background strip
+        overlay = img.copy()
+        cv2.rectangle(overlay, (0, h - strip_h), (w, h), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.55, img, 0.45, 0, dst=img)
+        # Two columns of metric text
+        items = list(metrics.items())
+        col_w = w // 2
+        for idx, (label, val) in enumerate(items[:6]):
+            row = idx // 2
+            col = idx % 2
+            x = 8 + col * col_w
+            y = h - strip_h + 16 + row * 16
+            cv2.putText(
+                img,
+                f"{label}: {val}",
+                (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.40,
+                self.METRIC_COLOR,
+                1,
+                lineType=16,
+            )
 
     @property
     def background(self) -> np.ndarray:

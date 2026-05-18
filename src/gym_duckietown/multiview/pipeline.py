@@ -50,7 +50,12 @@ class RolloutConfig:
     fps: int = 20
     tile_width: int = 320
     tile_height: int = 240
-    top_rear_height: float = 0.30
+    side_cam_height: float = 0.12
+    side_cam_pitch_deg: float = -8.0
+    cam_fov_y: float = 110.0  # vertical FOV (deg). Sim default 75 → 110 is ultra-wide.
+    driver_pitch_deg: float = 8.0  # sim default 19.15 — too downward; 8 shows periphery better
+    vantage_from: Optional[tuple] = None  # (x, y, z); None → SW corner default
+    vantage_at: Optional[tuple] = None  # (x, y, z); None → map center
     traj_window_sec: Optional[float] = None
     bitrate: str = "4M"
     log_every: int = 0  # 0 => auto
@@ -71,6 +76,7 @@ def run_rollout(
     controller: Callable,
     config: RolloutConfig,
     on_progress: Optional[Callable[[int, int, float], None]] = None,
+    pre_render: Optional[Callable[[int, float, object], None]] = None,
 ) -> int:
     """Roll the env with ``controller``, write a composite mp4, return frames written.
 
@@ -86,6 +92,10 @@ def run_rollout(
     ``config.log_every`` is positive (or auto-computed from total frames).
     """
     sim = env.unwrapped
+    if config.cam_fov_y is not None:
+        sim.cam_fov_y = float(config.cam_fov_y)
+    if config.driver_pitch_deg is not None:
+        sim.cam_angle[0] = float(config.driver_pitch_deg)
     obs = sim.render_obs()
 
     panel = TrajectoryPanel(sim, h=config.tile_height, w=config.tile_width)
@@ -107,8 +117,12 @@ def run_rollout(
     xs: List[float] = []
     zs: List[float] = []
     written = 0
+    last_action = (0.0, 0.0)
+    odometer = 0.0
+    last_pos = None
     t0 = time.time()
 
+    dt = 1.0 / float(config.fps)
     try:
         for step_idx in range(total):
             x, _y, z = sim.cur_pos
@@ -116,9 +130,37 @@ def run_rollout(
             zs.append(float(z))
             if window is not None:
                 sliding_window(xs, zs, window)
+            # Odometer: cumulative Euclidean distance in the (x, z) plane.
+            if last_pos is not None:
+                odometer += float(
+                    ((x - last_pos[0]) ** 2 + (z - last_pos[1]) ** 2) ** 0.5
+                )
+            last_pos = (float(x), float(z))
 
-            views = render_all_views(sim, top_rear_height=config.top_rear_height)
-            traj_img = panel.render(xs, zs)
+            if pre_render is not None:
+                pre_render(step_idx, step_idx * dt, sim)
+
+            views = render_all_views(
+                sim,
+                side_cam_height=config.side_cam_height,
+                side_cam_pitch_deg=config.side_cam_pitch_deg,
+                vantage_from=config.vantage_from,
+                vantage_at=config.vantage_at,
+            )
+            # Residual actuator decay leaves sim.speed at ~0.06 m/s even when
+            # the controller commanded a full stop; treat anything below
+            # 0.10 m/s as effectively stationary in the dashboard.
+            _raw_speed = float(getattr(sim, "speed", 0.0))
+            _disp_speed = 0.0 if abs(_raw_speed) < 0.10 else _raw_speed
+            metrics = {
+                "speed":   f"{_disp_speed:.2f} m/s",
+                "steer":   f"{float(last_action[1]):+.2f}",
+                "pedal":   f"{float(last_action[0]):+.2f}",
+                "odo":     f"{odometer:.1f} m",
+                "time":    f"{step_idx * dt:5.1f} s",
+                "step":    f"{step_idx + 1}/{total}",
+            }
+            traj_img = panel.render(xs, zs, metrics=metrics)
             frame = compose_frame(
                 default_layout(views, traj_img),
                 tile_h=config.tile_height,
@@ -128,6 +170,7 @@ def run_rollout(
             written += 1
 
             action = controller(obs)
+            last_action = (float(action[0]), float(action[1]))
             obs, _r, done, _info = env.step(action)
             if done:
                 print(

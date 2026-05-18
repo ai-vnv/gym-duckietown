@@ -184,11 +184,13 @@ CAMERA_MODES_EGO = "ego"
 CAMERA_MODES_MAP_TOPDOWN = "map_topdown"
 CAMERA_MODES_TOP_FOLLOW = "top_follow"
 CAMERA_MODES_REAR = "rear"
+CAMERA_MODES_EXTERNAL = "external"  # fixed world-space camera; reads sim.external_cam_*
 CAMERA_MODES = (
     CAMERA_MODES_EGO,
     CAMERA_MODES_MAP_TOPDOWN,
     CAMERA_MODES_TOP_FOLLOW,
     CAMERA_MODES_REAR,
+    CAMERA_MODES_EXTERNAL,
 )
 
 REWARD_INVALID_POSE = -1000
@@ -365,6 +367,16 @@ class Simulator(gym.Env):
             else {}
         )
         self.mining_ground_scatter = mining_ground_scatter
+
+        # User-registered floor decals (PNG quads rendered just above the
+        # ground plane; visible from all camera rigs). Populated lazily via
+        # :meth:`add_floor_decal`. See :mod:`gym_duckietown.decals`.
+        self.floor_decals: list = []
+
+        # User-registered billboards (vertical PNG quads — signs, banners,
+        # scoreboards). See :mod:`gym_duckietown.billboards`.
+        self.billboards: list = []
+
         information = get_graphics_information()
         logger.info(
             f"Information about the graphics card:",
@@ -2028,6 +2040,22 @@ class Simulator(gym.Env):
             lay = py + 0.04
             laz = pz - dz * look_depth
             gl.gluLookAt(cam_x, cam_y, cam_z, lax, lay, laz, 0.0, 1.0, 0.0)
+        elif mode == CAMERA_MODES_EXTERNAL:
+            # Fixed world-space camera. Caller sets ``sim.external_cam_from``
+            # and ``sim.external_cam_at`` (3-tuples in world meters); the
+            # camera renders the same world unchanged.
+            lf = getattr(self, "external_cam_from", None) or (0.0, 1.5, 0.0)
+            la = getattr(self, "external_cam_at", None) or (
+                self.grid_width * self.road_tile_size / 2.0,
+                0.0,
+                self.grid_height * self.road_tile_size / 2.0,
+            )
+            up = getattr(self, "external_cam_up", None) or (0.0, 1.0, 0.0)
+            gl.gluLookAt(
+                float(lf[0]), float(lf[1]), float(lf[2]),
+                float(la[0]), float(la[1]), float(la[2]),
+                float(up[0]), float(up[1]), float(up[2]),
+            )
 
         # Draw the ground quad
         gl.glDisable(gl.GL_TEXTURE_2D)
@@ -2129,6 +2157,20 @@ class Simulator(gym.Env):
                         continue
                     bezier_draw(pt, n=20)
 
+        # Floor decals (PNG quads at the ground plane). Drawn after road
+        # tiles so the texture sits visually on top of the asphalt; before
+        # objects so 3D meshes still occlude the decal correctly.
+        if not segment and self.floor_decals:
+            from .decals import draw_decals  # local import: avoid GL load at module import
+
+            draw_decals(self.floor_decals)
+
+        # Vertical billboards (signs, banners, scoreboards).
+        if not segment and self.billboards:
+            from .billboards import draw_billboards
+
+            draw_billboards(self.billboards)
+
         # For each object
         for obj in self.objects:
             obj.render(draw_bbox=self.draw_bbox, segment=segment, enable_leds=self.enable_leds)
@@ -2144,7 +2186,12 @@ class Simulator(gym.Env):
             gl.glVertex3f(corners[3, 0], 0.01, corners[3, 1])
             gl.glEnd()
 
-        if mode in (CAMERA_MODES_MAP_TOPDOWN, CAMERA_MODES_TOP_FOLLOW, CAMERA_MODES_REAR):
+        if mode in (
+            CAMERA_MODES_MAP_TOPDOWN,
+            CAMERA_MODES_TOP_FOLLOW,
+            CAMERA_MODES_REAR,
+            CAMERA_MODES_EXTERNAL,
+        ):
             gl.glPushMatrix()
             gl.glTranslatef(*self.cur_pos)
             gl.glScalef(1, 1, 1)
@@ -2252,6 +2299,85 @@ class Simulator(gym.Env):
                 )
             out = cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2RGB)
         return out
+
+    def add_floor_decal(
+        self,
+        *,
+        image_path: str,
+        position,
+        size: float = 0.5,
+        rotation_deg: float = 0.0,
+        lift: Optional[float] = None,
+    ):
+        """Register a PNG decal to be drawn on the ground plane.
+
+        Decals appear in all camera views (they are part of the GL scene).
+        Returns the created :class:`gym_duckietown.decals.FloorDecal` so the
+        caller can mutate / remove it later.
+
+        Parameters
+        ----------
+        image_path : str
+            Absolute path to a PNG (with alpha) or JPG.
+        position : tuple[float, float]
+            World ``(x, z)`` center in meters.
+        size : float
+            Length of the longer side in meters. Default 0.5.
+        rotation_deg : float
+            Yaw around the world y axis in degrees. Default 0.
+        lift : float, optional
+            Meters above the ground plane to avoid z-fighting. Defaults to
+            :data:`gym_duckietown.decals.DEFAULT_DECAL_LIFT`.
+        """
+        from .decals import DEFAULT_DECAL_LIFT, FloorDecal
+
+        decal = FloorDecal(
+            image_path=str(image_path),
+            position=(float(position[0]), float(position[1])),
+            size=float(size),
+            rotation_deg=float(rotation_deg),
+            lift=DEFAULT_DECAL_LIFT if lift is None else float(lift),
+        )
+        self.floor_decals.append(decal)
+        return decal
+
+    def add_billboard(
+        self,
+        *,
+        image_path: str,
+        position,
+        width: float = 0.4,
+        height: float = 0.3,
+        y_base: float = 0.0,
+        rotation_deg: float = 0.0,
+        enabled: bool = True,
+        single_sided: bool = True,
+    ):
+        """Register a vertical PNG billboard in the world.
+
+        Returns the created :class:`gym_duckietown.billboards.Billboard` so
+        the caller can mutate it (e.g. toggle ``enabled`` to swap traffic-
+        light states).
+
+        ``single_sided=True`` (the default) culls the back face so the
+        quad only renders from the side its texture faces — essential for
+        text/symbol signs so the back of the quad doesn't show as a
+        mirrored copy. Pass ``False`` for symmetric textures (poles).
+        """
+        from .billboards import Billboard
+
+        b = Billboard(
+            image_path=str(image_path),
+            position=(float(position[0]), float(position[1])),
+            width=float(width),
+            height=float(height),
+            y_base=float(y_base),
+            rotation_deg=float(rotation_deg),
+            enabled=bool(enabled),
+            single_sided=bool(single_sided),
+        )
+        self.billboards.append(b)
+        return b
 
     def render_obs(self, segment: bool = False) -> np.ndarray:
         """

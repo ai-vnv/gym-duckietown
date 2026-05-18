@@ -40,16 +40,21 @@ def test_background_drawn_only_on_drivable_tiles(stub_sim):
 
 
 def test_trajectory_draws_path_color_along_route(stub_sim):
+    """Newest end of the path renders close to PATH_COLOR.
+
+    Bucketed fading + AA means we won't find an exact match anywhere — the
+    newest bucket is *near* PATH_COLOR but AA blurs the edges. We look for
+    pixels within a small distance instead.
+    """
     panel = TrajectoryPanel(stub_sim, h=240, w=320)
     ts = stub_sim.road_tile_size
     xs = np.linspace(0.2, 2.0, 30).tolist()
     zs = np.full_like(xs, 0.5 * ts).tolist()
     img = panel.render(xs, zs)
-    # Look along the row where z = 0.5*ts; we should find at least one pixel
-    # tinted in PATH_COLOR (the polyline is 2px thick).
-    target = np.array(TrajectoryPanel.PATH_COLOR, dtype=np.uint8)
-    found = np.any(np.all(img == target, axis=-1))
-    assert found, "expected to find path-colored pixels along the trajectory"
+    target = np.array(TrajectoryPanel.PATH_COLOR, dtype=np.int16)
+    diff = np.abs(img.astype(np.int16) - target)
+    close = np.all(diff < 25, axis=-1)
+    assert close.sum() > 0, "expected near-PATH_COLOR pixels along the newest portion of the trajectory"
 
 
 def test_head_marker_drawn_at_last_point(stub_sim):

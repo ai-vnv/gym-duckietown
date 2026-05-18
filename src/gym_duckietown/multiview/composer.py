@@ -74,11 +74,10 @@ def compose_frame(
 def default_layout(views: dict, traj_img: np.ndarray) -> List[List[PanelSpec]]:
     """Standard 3x2 layout used by the CLI.
 
-    Top row: driver, BEV, trajectory (trajectory has its own title baked in,
-    so label is ``None`` to avoid double-stamping).
-    Bottom row: left, top-rear, right.
+    Top row: BEV, trajectory (self-titled, label=None), fixed vantage cam.
+    Bottom row: driver, left, right.
     """
     return [
-        [("driver", views["driver"]), ("BEV (map)", views["bev"]), (None, traj_img)],
-        [("left", views["left"]), ("top-rear", views["top_rear"]), ("right", views["right"])],
+        [("BEV (map)", views["bev"]), (None, traj_img), ("vantage", views["vantage"])],
+        [("driver", views["driver"]), ("left", views["left"]), ("right", views["right"])],
     ]

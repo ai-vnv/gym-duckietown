@@ -31,6 +31,7 @@ class StubSim:
     road_tile_size: float = 0.585
     cur_angle: float = 0.0
     cam_height: float = 0.108
+    cam_angle: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     cur_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     camera_width: int = 160
     camera_height: int = 120
@@ -55,8 +56,10 @@ class StubSim:
         return self._tiles.get((i, j))
 
     def _render_img(self, width, height, *_, **_kw):
-        """Stub renderer: records the (cur_angle, cam_height) seen at call time."""
-        self.render_calls.append((float(self.cur_angle), float(self.cam_height)))
+        """Stub renderer: records (cur_angle, cam_height, cam_pitch) at call time."""
+        self.render_calls.append(
+            (float(self.cur_angle), float(self.cam_height), float(self.cam_angle[0]))
+        )
         return np.full((int(height), int(width), 3), 128, dtype=np.uint8)
 
     def render_obs(self):

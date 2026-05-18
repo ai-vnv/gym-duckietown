@@ -73,12 +73,13 @@ def test_default_layout_keys_and_shape():
         "bev": _solid(60, 80),
         "left": _solid(60, 80),
         "right": _solid(60, 80),
-        "top_rear": _solid(60, 80),
+        "vantage": _solid(60, 80),
     }
     traj = _solid(60, 80)
     layout = default_layout(views, traj)
     assert len(layout) == 2
     assert all(len(row) == 3 for row in layout)
-    # Trajectory entry has label=None (already self-titled).
+    # Trajectory entry has label=None (already self-titled). It's in the
+    # middle slot of the top row in the current layout.
     labels_top = [lab for lab, _ in layout[0]]
-    assert labels_top[2] is None
+    assert labels_top[1] is None

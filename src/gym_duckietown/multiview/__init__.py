@@ -21,16 +21,32 @@ from .cameras import (
 from .composer import compose_frame, draw_label
 from .controller import SmoothedController
 from .pipeline import RolloutConfig, run_rollout
+from .scenarios import (
+    Scenario,
+    apply_scenario,
+    build_rule_controller,
+    get_scenario,
+    list_scenarios,
+    register_scenario,
+    sync_traffic_light_visuals,
+)
 from .trajectory import TrajectoryPanel
 
 __all__ = [
     "RolloutConfig",
+    "Scenario",
     "SmoothedController",
     "TrajectoryPanel",
+    "apply_scenario",
+    "build_rule_controller",
     "compose_frame",
     "draw_label",
+    "get_scenario",
+    "list_scenarios",
+    "register_scenario",
     "render_all_views",
     "render_ego_yaw",
     "render_mode",
     "run_rollout",
+    "sync_traffic_light_visuals",
 ]
